@@ -64,7 +64,7 @@ jobs:
           set -euo pipefail
 
           # --- Filter: skip own activity and bots ---
-          SKIP_USERS="prestomation dependabot[bot] github-actions[bot] renovate[bot] pre-commit-ci[bot]"
+          SKIP_USERS="prestomation dependabot[bot] github-actions[bot] renovate[bot] pre-commit-ci[bot] amazon-q-developer[bot]"
           for u in $SKIP_USERS; do
             if [[ "$ACTOR" == "$u" ]]; then
               echo "Skipping internal actor: $ACTOR"
