@@ -1,0 +1,161 @@
+# Reusable workflow: posts external GitHub interactions to Discord
+# Called by repos with: uses: prestomation/.github/.github/workflows/notify-discord.yml@main
+# Required secret: DISCORD_WEBHOOK_URL
+
+name: Notify Discord
+
+on:
+  workflow_call:
+    secrets:
+      DISCORD_WEBHOOK_URL:
+        required: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build and send Discord notification
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.sender.login }}
+        run: |
+          set -euo pipefail
+
+          # --- Filter: skip own activity and bots ---
+          SKIP_USERS="prestomation dependabot[bot] github-actions[bot] renovate[bot] pre-commit-ci[bot]"
+          for u in $SKIP_USERS; do
+            if [[ "$ACTOR" == "$u" ]]; then
+              echo "Skipping internal actor: $ACTOR"
+              exit 0
+            fi
+          done
+
+          # --- Determine event details ---
+          case "$EVENT_NAME" in
+            issues)
+              OBJ_URL="${{ github.event.issue.html_url }}"
+              OBJ_TITLE="${{ github.event.issue.title }}"
+              OBJ_NUM="#${{ github.event.issue.number }}"
+              OBJ_BODY="${{ github.event.issue.body }}"
+              AUTHOR="${{ github.event.issue.user.login }}"
+              AUTHOR_AVATAR="${{ github.event.issue.user.avatar_url }}"
+              case "$EVENT_ACTION" in
+                opened)   COLOR=5763719;  ACTION="Issue opened";;
+                edited)   COLOR=3447003;  ACTION="Issue edited";;
+                closed)   COLOR=15158332; ACTION="Issue closed";;
+                reopened) COLOR=3066993;  ACTION="Issue reopened";;
+                *)        echo "Unhandled issue action: $EVENT_ACTION"; exit 0;;
+              esac
+              ;;
+            pull_request)
+              OBJ_URL="${{ github.event.pull_request.html_url }}"
+              OBJ_TITLE="${{ github.event.pull_request.title }}"
+              OBJ_NUM="#${{ github.event.pull_request.number }}"
+              OBJ_BODY="${{ github.event.pull_request.body }}"
+              AUTHOR="${{ github.event.pull_request.user.login }}"
+              AUTHOR_AVATAR="${{ github.event.pull_request.user.avatar_url }}"
+              case "$EVENT_ACTION" in
+                opened)      COLOR=5763719;  ACTION="PR opened";;
+                edited)      COLOR=3447003;  ACTION="PR edited";;
+                closed)      COLOR=15158332; ACTION="PR closed";;
+                reopened)    COLOR=3066993;  ACTION="PR reopened";;
+                review_requested) COLOR=15844397; ACTION="Review requested";;
+                *)           echo "Unhandled PR action: $EVENT_ACTION"; exit 0;;
+              esac
+              ;;
+            issue_comment)
+              OBJ_URL="${{ github.event.comment.html_url }}"
+              OBJ_TITLE="${{ github.event.issue.title }}"
+              OBJ_NUM="#${{ github.event.issue.number }}"
+              OBJ_BODY="${{ github.event.comment.body }}"
+              AUTHOR="${{ github.event.comment.user.login }}"
+              AUTHOR_AVATAR="${{ github.event.comment.user.avatar_url }}"
+              COLOR=3447003
+              if [[ "${{ github.event.issue.pull_request }}" == "null" || -z "${{ github.event.issue.pull_request }}" ]]; then
+                ACTION="Comment on issue"
+              else
+                ACTION="Comment on PR"
+              fi
+              ;;
+            pull_request_review)
+              OBJ_URL="${{ github.event.review.html_url }}"
+              OBJ_TITLE="${{ github.event.pull_request.title }}"
+              OBJ_NUM="#${{ github.event.pull_request.number }}"
+              OBJ_BODY="${{ github.event.review.body }}"
+              AUTHOR="${{ github.event.review.user.login }}"
+              AUTHOR_AVATAR="${{ github.event.review.user.avatar_url }}"
+              case "$EVENT_ACTION" in
+                submitted)  COLOR=5763719;  ACTION="Review submitted";;
+                edited)     COLOR=3447003;  ACTION="Review edited";;
+                dismissed)  COLOR=15158332; ACTION="Review dismissed";;
+                *)          echo "Unhandled review action: $EVENT_ACTION"; exit 0;;
+              esac
+              ;;
+            pull_request_review_comment)
+              OBJ_URL="${{ github.event.comment.html_url }}"
+              OBJ_TITLE="${{ github.event.pull_request.title }}"
+              OBJ_NUM="#${{ github.event.pull_request.number }}"
+              OBJ_BODY="${{ github.event.comment.body }}"
+              AUTHOR="${{ github.event.comment.user.login }}"
+              AUTHOR_AVATAR="${{ github.event.comment.user.avatar_url }}"
+              COLOR=3447003
+              ACTION="Review comment"
+              ;;
+            *)
+              echo "Unhandled event: $EVENT_NAME"
+              exit 0
+              ;;
+          esac
+
+          # --- Truncate body to ~300 chars ---
+          BODY_SNIPPET=$(echo "$OBJ_BODY" | head -c 300)
+          if [[ ${#OBJ_BODY} -gt 300 ]]; then
+            BODY_SNIPPET="${BODY_SNIPPET}..."
+          fi
+          # Escape for JSON
+          BODY_SNIPPET=$(echo "$BODY_SNIPPET" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))' | sed 's/^"//;s/"$//')
+
+          # --- Build Discord embed JSON ---
+          READABLE_REPO=$(echo "$REPO" | sed 's|prestomation/||')
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          PAYLOAD=$(cat <<ENDJSON
+          {
+            "username": "GitHub Notify",
+            "embeds": [{
+              "title": "${ACTION}: ${OBJ_TITLE} (${OBJ_NUM})",
+              "url": "${OBJ_URL}",
+              "description": "${BODY_SNIPPET}",
+              "color": ${COLOR},
+              "author": {
+                "name": "${AUTHOR} in ${READABLE_REPO}",
+                "icon_url": "${AUTHOR_AVATAR}"
+              },
+              "footer": {
+                "text": "${REPO}"
+              },
+              "timestamp": "${TIMESTAMP}"
+            }]
+          }
+          ENDJSON
+          )
+
+          # --- Send to Discord ---
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          if [[ "$HTTP_CODE" -ge 200 && "$HTTP_CODE" -lt 300 ]]; then
+            echo "Discord notification sent successfully (HTTP $HTTP_CODE)"
+          else
+            echo "Failed to send Discord notification (HTTP $HTTP_CODE)"
+            echo "Response: $BODY"
+            exit 1
+          fi
