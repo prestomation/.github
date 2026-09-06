@@ -4,6 +4,14 @@
 #
 # Handles: issues, PRs, comments, reviews, and all release publishes (including pre-releases).
 # Discord URL previews are suppressed to keep messages compact.
+#
+# Security note: every value that originates from the GitHub event payload is
+# attacker-controlled (anyone who can comment can set it). Such values are passed
+# into the step through `env:` and never inlined into `run:` as a `${{ }}`
+# expression, because an inlined expression is substituted into the script text
+# before bash parses it and no amount of quoting can make it safe. The Discord
+# payload is assembled with `jq --arg`, so untrusted text is escaped as JSON data
+# rather than interpolated into a shell or JSON string.
 
 name: Notify Discord
 
@@ -24,6 +32,34 @@ jobs:
           EVENT_ACTION: ${{ github.event.action }}
           REPO: ${{ github.repository }}
           ACTOR: ${{ github.event.sender.login }}
+          # --- Untrusted event payload fields (never inline these into run:) ---
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_USER: ${{ github.event.issue.user.login }}
+          ISSUE_AVATAR: ${{ github.event.issue.user.avatar_url }}
+          ISSUE_PR_URL: ${{ github.event.issue.pull_request.url }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
+          PR_AVATAR: ${{ github.event.pull_request.user.avatar_url }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          COMMENT_AVATAR: ${{ github.event.comment.user.avatar_url }}
+          REVIEW_URL: ${{ github.event.review.html_url }}
+          REVIEW_BODY: ${{ github.event.review.body }}
+          REVIEW_USER: ${{ github.event.review.user.login }}
+          REVIEW_AVATAR: ${{ github.event.review.user.avatar_url }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_USER: ${{ github.event.release.author.login }}
+          RELEASE_AVATAR: ${{ github.event.release.author.avatar_url }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           set -euo pipefail
 
@@ -39,12 +75,12 @@ jobs:
           # --- Determine event details ---
           case "$EVENT_NAME" in
             issues)
-              OBJ_URL="${{ github.event.issue.html_url }}"
-              OBJ_TITLE="${{ github.event.issue.title }}"
-              OBJ_NUM="#${{ github.event.issue.number }}"
-              OBJ_BODY="${{ github.event.issue.body }}"
-              AUTHOR="${{ github.event.issue.user.login }}"
-              AUTHOR_AVATAR="${{ github.event.issue.user.avatar_url }}"
+              OBJ_URL="$ISSUE_URL"
+              OBJ_TITLE="$ISSUE_TITLE"
+              OBJ_NUM="#${ISSUE_NUMBER}"
+              OBJ_BODY="$ISSUE_BODY"
+              AUTHOR="$ISSUE_USER"
+              AUTHOR_AVATAR="$ISSUE_AVATAR"
               case "$EVENT_ACTION" in
                 opened)   COLOR=5763719;  ACTION="Issue opened";;
                 edited)   COLOR=3447003;  ACTION="Issue edited";;
@@ -54,12 +90,12 @@ jobs:
               esac
               ;;
             pull_request)
-              OBJ_URL="${{ github.event.pull_request.html_url }}"
-              OBJ_TITLE="${{ github.event.pull_request.title }}"
-              OBJ_NUM="#${{ github.event.pull_request.number }}"
-              OBJ_BODY="${{ github.event.pull_request.body }}"
-              AUTHOR="${{ github.event.pull_request.user.login }}"
-              AUTHOR_AVATAR="${{ github.event.pull_request.user.avatar_url }}"
+              OBJ_URL="$PR_URL"
+              OBJ_TITLE="$PR_TITLE"
+              OBJ_NUM="#${PR_NUMBER}"
+              OBJ_BODY="$PR_BODY"
+              AUTHOR="$PR_USER"
+              AUTHOR_AVATAR="$PR_AVATAR"
               case "$EVENT_ACTION" in
                 opened)      COLOR=5763719;  ACTION="PR opened";;
                 edited)      COLOR=3447003;  ACTION="PR edited";;
@@ -70,26 +106,26 @@ jobs:
               esac
               ;;
             issue_comment)
-              OBJ_URL="${{ github.event.comment.html_url }}"
-              OBJ_TITLE="${{ github.event.issue.title }}"
-              OBJ_NUM="#${{ github.event.issue.number }}"
-              OBJ_BODY="${{ github.event.comment.body }}"
-              AUTHOR="${{ github.event.comment.user.login }}"
-              AUTHOR_AVATAR="${{ github.event.comment.user.avatar_url }}"
+              OBJ_URL="$COMMENT_URL"
+              OBJ_TITLE="$ISSUE_TITLE"
+              OBJ_NUM="#${ISSUE_NUMBER}"
+              OBJ_BODY="$COMMENT_BODY"
+              AUTHOR="$COMMENT_USER"
+              AUTHOR_AVATAR="$COMMENT_AVATAR"
               COLOR=3447003
-              if [[ "${{ github.event.issue.pull_request }}" == "null" || -z "${{ github.event.issue.pull_request }}" ]]; then
+              if [[ -z "$ISSUE_PR_URL" ]]; then
                 ACTION="Comment on issue"
               else
                 ACTION="Comment on PR"
               fi
               ;;
             pull_request_review)
-              OBJ_URL="${{ github.event.review.html_url }}"
-              OBJ_TITLE="${{ github.event.pull_request.title }}"
-              OBJ_NUM="#${{ github.event.pull_request.number }}"
-              OBJ_BODY="${{ github.event.review.body }}"
-              AUTHOR="${{ github.event.review.user.login }}"
-              AUTHOR_AVATAR="${{ github.event.review.user.avatar_url }}"
+              OBJ_URL="$REVIEW_URL"
+              OBJ_TITLE="$PR_TITLE"
+              OBJ_NUM="#${PR_NUMBER}"
+              OBJ_BODY="$REVIEW_BODY"
+              AUTHOR="$REVIEW_USER"
+              AUTHOR_AVATAR="$REVIEW_AVATAR"
               case "$EVENT_ACTION" in
                 submitted)  COLOR=5763719;  ACTION="Review submitted";;
                 edited)     COLOR=3447003;  ACTION="Review edited";;
@@ -98,12 +134,12 @@ jobs:
               esac
               ;;
             pull_request_review_comment)
-              OBJ_URL="${{ github.event.comment.html_url }}"
-              OBJ_TITLE="${{ github.event.pull_request.title }}"
-              OBJ_NUM="#${{ github.event.pull_request.number }}"
-              OBJ_BODY="${{ github.event.comment.body }}"
-              AUTHOR="${{ github.event.comment.user.login }}"
-              AUTHOR_AVATAR="${{ github.event.comment.user.avatar_url }}"
+              OBJ_URL="$COMMENT_URL"
+              OBJ_TITLE="$PR_TITLE"
+              OBJ_NUM="#${PR_NUMBER}"
+              OBJ_BODY="$COMMENT_BODY"
+              AUTHOR="$COMMENT_USER"
+              AUTHOR_AVATAR="$COMMENT_AVATAR"
               COLOR=3447003
               ACTION="Review comment"
               ;;
@@ -112,13 +148,13 @@ jobs:
                 echo "Skipping release action: $EVENT_ACTION"
                 exit 0
               fi
-              OBJ_URL="${{ github.event.release.html_url }}"
-              OBJ_TITLE="${{ github.event.release.name }}"
+              OBJ_URL="$RELEASE_URL"
+              OBJ_TITLE="$RELEASE_NAME"
               OBJ_NUM=""
-              OBJ_BODY="${{ github.event.release.body }}"
-              AUTHOR="${{ github.event.release.author.login }}"
-              AUTHOR_AVATAR="${{ github.event.release.author.avatar_url }}"
-              if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+              OBJ_BODY="$RELEASE_BODY"
+              AUTHOR="$RELEASE_USER"
+              AUTHOR_AVATAR="$RELEASE_AVATAR"
+              if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
                 COLOR=15844397
                 ACTION="Pre-release published"
               else
@@ -133,15 +169,14 @@ jobs:
           esac
 
           # --- Truncate body to ~300 chars ---
-          BODY_SNIPPET=$(echo "$OBJ_BODY" | head -c 300)
           if [[ ${#OBJ_BODY} -gt 300 ]]; then
-            BODY_SNIPPET="${BODY_SNIPPET}..."
+            BODY_SNIPPET="${OBJ_BODY:0:300}..."
+          else
+            BODY_SNIPPET="$OBJ_BODY"
           fi
-          # Escape for JSON
-          BODY_SNIPPET=$(echo "$BODY_SNIPPET" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))' | sed 's/^"//;s/"$//')
 
           # --- Build Discord embed JSON ---
-          READABLE_REPO=$(echo "$REPO" | sed 's|prestomation/||')
+          READABLE_REPO="${REPO#prestomation/}"
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           # For releases, put version in title; for others, use issue/PR number
@@ -151,32 +186,47 @@ jobs:
             EMBED_TITLE="${ACTION}: ${OBJ_TITLE} (${OBJ_NUM})"
           fi
 
-          PAYLOAD=$(cat <<ENDJSON
-          {
-            "username": "GitHub Notify",
-            "suppress_embeds": true,
-            "embeds": [{
-              "title": "${EMBED_TITLE}",
-              "url": "${OBJ_URL}",
-              "description": "${BODY_SNIPPET}",
-              "color": ${COLOR},
-              "author": {
-                "name": "${AUTHOR} in ${READABLE_REPO}",
-                "icon_url": "${AUTHOR_AVATAR}"
-              },
-              "footer": {
-                "text": "${REPO}"
-              },
-              "timestamp": "${TIMESTAMP}"
-            }]
-          }
-          ENDJSON
-          )
+          # COLOR is set by every branch above, but --argjson aborts on anything
+          # that is not valid JSON, so fall back to the neutral blue if it is not
+          # a plain integer.
+          if ! [[ "${COLOR:-}" =~ ^[0-9]+$ ]]; then
+            COLOR=3447003
+          fi
+
+          # Every untrusted value is passed as a jq argument and encoded as JSON
+          # data. Nothing below is expanded by the shell or spliced into a string.
+          PAYLOAD=$(jq -n \
+            --arg title "$EMBED_TITLE" \
+            --arg url "$OBJ_URL" \
+            --arg description "$BODY_SNIPPET" \
+            --arg author "$AUTHOR in $READABLE_REPO" \
+            --arg icon "$AUTHOR_AVATAR" \
+            --arg footer "$REPO" \
+            --arg ts "$TIMESTAMP" \
+            --argjson color "$COLOR" \
+            '{
+              username: "GitHub Notify",
+              suppress_embeds: true,
+              embeds: [
+                {
+                  title: $title,
+                  url: $url,
+                  description: ($description | gsub("^\\s+|\\s+$"; "")),
+                  color: $color,
+                  author: { name: $author, icon_url: $icon },
+                  footer: { text: $footer },
+                  timestamp: $ts
+                }
+                # Discord rejects an empty description; drop the key instead.
+                | if .description == "" then del(.description) else . end
+                | if .url == "" then del(.url) else . end
+              ]
+            }')
 
           # --- Send to Discord ---
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+          RESPONSE=$(printf '%s' "$PAYLOAD" | curl -s -w "\n%{http_code}" -X POST \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD" \
+            --data-binary @- \
             "$DISCORD_WEBHOOK_URL")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
