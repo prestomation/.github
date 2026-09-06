@@ -2,7 +2,8 @@
 # Called by repos with: uses: prestomation/.github/.github/workflows/notify-discord.yml@main
 # Required secret: DISCORD_WEBHOOK_URL
 #
-# Handles: issues, PRs, comments, reviews, and release publishes (excluding pre-releases).
+# Handles: issues, PRs, comments, reviews, and all release publishes (including pre-releases).
+# Discord URL previews are suppressed to keep messages compact.
 
 name: Notify Discord
 
@@ -107,11 +108,6 @@ jobs:
               ACTION="Review comment"
               ;;
             release)
-              # Skip pre-releases — only notify on actual releases
-              if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
-                echo "Skipping pre-release: ${{ github.event.release.tag_name }}"
-                exit 0
-              fi
               if [[ "$EVENT_ACTION" != "published" ]]; then
                 echo "Skipping release action: $EVENT_ACTION"
                 exit 0
@@ -122,8 +118,13 @@ jobs:
               OBJ_BODY="${{ github.event.release.body }}"
               AUTHOR="${{ github.event.release.author.login }}"
               AUTHOR_AVATAR="${{ github.event.release.author.avatar_url }}"
-              COLOR=5763719
-              ACTION="Released"
+              if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+                COLOR=15844397
+                ACTION="Pre-release published"
+              else
+                COLOR=5763719
+                ACTION="Released"
+              fi
               ;;
             *)
               echo "Unhandled event: $EVENT_NAME"
@@ -153,6 +154,7 @@ jobs:
           PAYLOAD=$(cat <<ENDJSON
           {
             "username": "GitHub Notify",
+            "suppress_embeds": true,
             "embeds": [{
               "title": "${EMBED_TITLE}",
               "url": "${OBJ_URL}",
