@@ -1,6 +1,8 @@
 # Reusable workflow: posts external GitHub interactions to Discord
 # Called by repos with: uses: prestomation/.github/.github/workflows/notify-discord.yml@main
 # Required secret: DISCORD_WEBHOOK_URL
+#
+# Handles: issues, PRs, comments, reviews, and release publishes (excluding pre-releases).
 
 name: Notify Discord
 
@@ -104,6 +106,25 @@ jobs:
               COLOR=3447003
               ACTION="Review comment"
               ;;
+            release)
+              # Skip pre-releases — only notify on actual releases
+              if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+                echo "Skipping pre-release: ${{ github.event.release.tag_name }}"
+                exit 0
+              fi
+              if [[ "$EVENT_ACTION" != "published" ]]; then
+                echo "Skipping release action: $EVENT_ACTION"
+                exit 0
+              fi
+              OBJ_URL="${{ github.event.release.html_url }}"
+              OBJ_TITLE="${{ github.event.release.name }}"
+              OBJ_NUM=""
+              OBJ_BODY="${{ github.event.release.body }}"
+              AUTHOR="${{ github.event.release.author.login }}"
+              AUTHOR_AVATAR="${{ github.event.release.author.avatar_url }}"
+              COLOR=5763719
+              ACTION="Released"
+              ;;
             *)
               echo "Unhandled event: $EVENT_NAME"
               exit 0
@@ -122,11 +143,18 @@ jobs:
           READABLE_REPO=$(echo "$REPO" | sed 's|prestomation/||')
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+          # For releases, put version in title; for others, use issue/PR number
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            EMBED_TITLE="${ACTION}: ${OBJ_TITLE}"
+          else
+            EMBED_TITLE="${ACTION}: ${OBJ_TITLE} (${OBJ_NUM})"
+          fi
+
           PAYLOAD=$(cat <<ENDJSON
           {
             "username": "GitHub Notify",
             "embeds": [{
-              "title": "${ACTION}: ${OBJ_TITLE} (${OBJ_NUM})",
+              "title": "${EMBED_TITLE}",
               "url": "${OBJ_URL}",
               "description": "${BODY_SNIPPET}",
               "color": ${COLOR},
