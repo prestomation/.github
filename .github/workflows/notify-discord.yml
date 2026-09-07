@@ -1,6 +1,9 @@
 # Reusable workflow: posts external GitHub interactions to Discord
 # Called by repos with: uses: prestomation/.github/.github/workflows/notify-discord.yml@main
-# Required secret: DISCORD_WEBHOOK_URL
+#
+# The webhook URL can be supplied either as the `webhook-url` input (preferred)
+# or via the `DISCORD_WEBHOOK_URL` secret (fallback, for backward compatibility
+# with existing callers). The input takes precedence when both are provided.
 #
 # Handles: issues, PRs, comments, reviews, and all release publishes (including pre-releases).
 # Discord URL previews are suppressed to keep messages compact.
@@ -17,9 +20,14 @@ name: Notify Discord
 
 on:
   workflow_call:
+    inputs:
+      webhook-url:
+        description: 'Discord webhook URL. Overrides the DISCORD_WEBHOOK_URL secret when provided.'
+        type: string
+        required: false
     secrets:
       DISCORD_WEBHOOK_URL:
-        required: true
+        required: false
 
 jobs:
   notify:
@@ -27,7 +35,7 @@ jobs:
     steps:
       - name: Build and send Discord notification
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ inputs.webhook-url || secrets.DISCORD_WEBHOOK_URL }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_ACTION: ${{ github.event.action }}
           REPO: ${{ github.repository }}
@@ -62,6 +70,12 @@ jobs:
           RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           set -euo pipefail
+
+          # --- Guard: a webhook URL is required (input or secret) ---
+          if [[ -z "$DISCORD_WEBHOOK_URL" ]]; then
+            echo "No Discord webhook URL provided. Pass it via the 'webhook-url' input or set the DISCORD_WEBHOOK_URL secret."
+            exit 1
+          fi
 
           # --- Filter: skip own activity and bots ---
           SKIP_USERS="prestomation dependabot[bot] github-actions[bot] renovate[bot] pre-commit-ci[bot] amazon-q-developer[bot]"
